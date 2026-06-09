@@ -1,0 +1,5 @@
+pandas
+numpy
+yfinance      # 미국 주식 시세 (야후 파이낸스)
+pykrx         # 한국 주식 시세 (KRX) — 백테스트 대시보드용
+lxml          # 유니버스(러셀1000 등) Wikipedia 표 파싱용

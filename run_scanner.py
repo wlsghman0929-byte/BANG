@@ -53,7 +53,7 @@ def one_cycle():
         }
 
     meta = {
-        "generated": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "generated": dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S KST"),
         "fast": C.FAST_MA, "slow": C.SLOW_MA,
         "big_move": C.BIG_MOVE_PCT,
         "vol_surge": C.VOL_SURGE_MULT,

@@ -52,17 +52,17 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .tab.active{color:var(--text);border-bottom-color:var(--accent)}
   .view{display:none}.view.active{display:block}
   .hint{color:var(--muted);font-size:12px;margin:0 0 8px}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+  table{width:100%;border-collapse:collapse;font-size:15px}
+  th,td{padding:12px 12px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
   th:first-child,td:first-child,th.l,td.l{text-align:left}
   th{color:var(--muted);font-weight:600;font-size:11.5px}
   tbody tr{cursor:pointer}
   tbody tr:hover td{background:var(--panel2)}
   .rank{color:var(--muted);width:26px}
   .tk{font-weight:700;color:var(--text)}
-  .nm{color:var(--muted);font-size:11.5px;margin-left:6px}
+  .nm{color:var(--muted);font-size:12.5px;margin-left:6px}
   .pos{color:var(--up)}.neg{color:var(--down)}
-  .badge{padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+  .badge{padding:4px 12px;border-radius:20px;font-size:13px;font-weight:700}
   .b-buy{background:rgba(242,54,69,.15);color:var(--up)}
   .b-sell{background:rgba(59,130,246,.18);color:var(--down)}
   .b-hold{background:rgba(139,148,158,.15);color:var(--muted)}
@@ -102,7 +102,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <div class="tab" data-v="vol_surge">🔊 거래량 급증</div>
     <div class="tab" data-v="volatile">⚡ 변동성 상위</div>
   </div>
-  <p class="hint">💡 종목 행을 클릭하면 가격·매수세/매도세 차트가 열립니다. &nbsp; 상승=<span class="pos">빨강</span>·하락=<span class="neg">파랑</span> &nbsp; *예측마감 = 추세·변동성 기반 다음 장 마감가 추정치, '적중'은 과거 30일 방향 적중률(참고용).</p>
+  <p class="hint">💡 종목을 누르면 상세 차트가 열려요. 상승=<span class="pos">빨강</span>·하락=<span class="neg">파랑</span>. &nbsp; ※ 등락은 직전 <b>정규장 종가 기준</b>(프리장 제외) · 예측마감은 참고용 추정치예요.</p>
   <div id="panes"></div>
 </div>
 <div class="overlay" id="overlay">
@@ -146,31 +146,35 @@ function spark(arr){
   const up=arr[arr.length-1]>=arr[0];
   return `<svg class="spark" width="${w}" height="${h}"><polyline fill="none" stroke="${up?UP:DOWN}" stroke-width="1.3" points="${pts}"/></svg>`;
 }
+const sgT = s => s==='BUY'?'매수':s==='SELL'?'매도':'관망';
 function row(r,i,mode){
   const cy=CUR[curMarket]||'';
   const hotMove = Math.abs(r.day_change)>=M.big_move?'<span class="hot">급변동</span>':'';
   const hotVol = r.vol_ratio>=M.vol_surge?'<span class="hot">거래량↑</span>':'';
-  const reason = mode==='recommend' ? `<td class="reason">${(r.reasons||[]).join(' · ')}</td>` : '';
+  let ex = mode==='vol_surge'?`<td>${r.vol_ratio}x</td>`
+         : mode==='volatile'?`<td>${r.atr_pct}%</td>`
+         : mode==='recommend'?`<td>${r.score}/5</td>`
+         : `<td>${r.rsi}</td>`;
   return `<tr data-mode="${mode}" data-idx="${i}">
     <td class="rank">${i+1}</td>
     <td class="l"><span class="tk">${r.ticker}</span><span class="nm">${r.name||''}</span>${(mode==='gainers'||mode==='losers')?hotMove:''}${mode==='vol_surge'?hotVol:''}</td>
     <td>${cy}${fmt(r.close)}</td>
     <td class="${cls(r.day_change)}">${r.day_change>0?'+':''}${r.day_change}%</td>
-    <td style="line-height:1.25"><div>${cy}${fmt(r.pred_close)}</div>
-      <div style="font-size:10.5px"><span class="${cls(r.pred_chg)}">${r.pred_chg>0?'+':''}${r.pred_chg}%</span> <span class="pl">적중 ${r.pred_hit}%</span></div></td>
-    <td>${r.vol_ratio}x</td><td>${r.atr_pct}%</td><td>${r.rsi}</td><td>${r.score}/5</td>
-    <td><span class="badge ${sgC(r.signal)}">${r.signal}</span></td>
-    <td>${spark(r.spark)}</td>${reason}
+    <td>${cy}${fmt(r.pred_close)} <span class="${cls(r.pred_chg)}" style="font-size:11px">(${r.pred_chg>0?'+':''}${r.pred_chg}%)</span></td>
+    <td><span class="badge ${sgC(r.signal)}">${sgT(r.signal)}</span></td>
+    ${ex}
+    <td>${spark(r.spark)}</td>
   </tr>`;
 }
-const heads = `<tr><th class="rank">#</th><th class="l">티커 · 종목명</th><th>현재가</th><th>등락</th>
-  <th>예측마감*</th><th>거래량배수</th><th>변동성(ATR%)</th><th>RSI</th><th>점수</th><th>신호</th><th>추세</th>`;
+function headFor(mode){
+  const exh = mode==='vol_surge'?'거래량':mode==='volatile'?'변동성':mode==='recommend'?'점수':'RSI';
+  return `<tr><th class="rank">#</th><th class="l">종목</th><th>현재가</th><th>등락</th><th>예측마감</th><th>신호</th><th>${exh}</th><th>추세</th></tr>`;
+}
 function pane(mode,rows){
-  const extra = mode==='recommend' ? '<th class="l">근거</th>':'';
   const body = rows.length? rows.map((r,i)=>row(r,i,mode)).join('')
-    : '<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:24px">해당 조건 종목 없음</td></tr>';
+    : '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">해당 조건 종목 없음</td></tr>';
   return `<div class="view ${mode===curTab?'active':''}" id="${mode}">
-    <table><thead>${heads}${extra}</tr></thead><tbody>${body}</tbody></table></div>`;
+    <table><thead>${headFor(mode)}</thead><tbody>${body}</tbody></table></div>`;
 }
 function renderMarket(){
   const info = MK[curMarket], rk = info.ranked;
@@ -199,7 +203,7 @@ function openModal(mode, idx){
   const d=r.detail, cy=CUR[curMarket]||''; modalOpen=true;
   document.getElementById('mTitle').textContent = `${r.ticker}  ${r.name||''}`;
   document.getElementById('mSub').textContent =
-    `현재가 ${cy}${fmt(r.close)} · 등락 ${r.day_change>0?'+':''}${r.day_change}% · RSI ${r.rsi} · 신호 ${r.signal}`;
+    `현재가 ${cy}${fmt(r.close)} · 등락 ${r.day_change>0?'+':''}${r.day_change}% · RSI ${r.rsi} · 신호 ${sgT(r.signal)}`;
   const buyPct = r.buy_ratio!=null? r.buy_ratio : 50;
   document.getElementById('mBar').style.width = buyPct+'%';
   document.getElementById('mBuyPct').textContent = `(매수 ${buyPct}% · 매도 ${(100-buyPct).toFixed(1)}%, 최근20일)`;

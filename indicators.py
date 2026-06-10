@@ -35,6 +35,17 @@ def bollinger(s: pd.Series, n: int = 20, k: float = 2.0):
     return mid + k * sd, mid, mid - k * sd
 
 
+def mfi(df: pd.DataFrame, n: int = 14) -> pd.Series:
+    """자금흐름지표 (Money Flow Index). 0~100, 50 이상 매수자금 우위."""
+    tp = (df["High"] + df["Low"] + df["Close"]) / 3
+    mf = tp * df["Volume"]
+    pos = mf.where(tp > tp.shift(1), 0.0)
+    neg = mf.where(tp < tp.shift(1), 0.0)
+    pr = pos.rolling(n).sum()
+    nr = neg.rolling(n).sum().replace(0, np.nan)
+    return (100 - 100 / (1 + pr / nr)).fillna(50)
+
+
 def add_all(df: pd.DataFrame, fast_ma: int, slow_ma: int) -> pd.DataFrame:
     """OHLCV DataFrame에 표준 지표 컬럼을 추가."""
     out = df.copy()
@@ -46,4 +57,5 @@ def add_all(df: pd.DataFrame, fast_ma: int, slow_ma: int) -> pd.DataFrame:
     out["MACD"], out["MACD_signal"], out["MACD_hist"] = m, sig, hist
     up, mid, low = bollinger(c, 20, 2.0)
     out["BB_up"], out["BB_mid"], out["BB_low"] = up, mid, low
+    out["MFI"] = mfi(out, 14)
     return out

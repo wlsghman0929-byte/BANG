@@ -60,7 +60,7 @@ def one_cycle():
     try:
         kr_rk = markets.get("KR", {}).get("ranked", {})
         seen_kr = {}
-        for key in ("recommend", "gainers", "losers", "vol_surge", "volatile"):
+        for key in ("recommend", "imminent", "gainers", "losers", "vol_surge", "volatile"):
             for r in kr_rk.get(key, []):
                 seen_kr.setdefault(r["ticker"], r)
         for j, (tk, r) in enumerate(seen_kr.items()):
@@ -72,6 +72,24 @@ def one_cycle():
         print(f"  [투자자] 한국 {min(len(seen_kr), 40)}종목 매매동향 첨부")
     except Exception as e:
         print(f"  [투자자] 오류: {repr(e)[:70]}")
+
+    # 기간별 차트(일/주/월/년) — 시장별 표시 상위 종목에 첨부 (최대 40)
+    for mk in markets:
+        try:
+            rk = markets[mk]["ranked"]
+            seenc = {}
+            for key in ("recommend", "imminent", "gainers", "losers", "vol_surge", "volatile"):
+                for r in rk.get(key, []):
+                    seenc.setdefault(r["ticker"], r)
+            for j, (tk, r) in enumerate(seenc.items()):
+                if j >= 40:
+                    break
+                ch = scanner.fetch_chart_series(mk, tk)
+                if ch:
+                    r["chart"] = ch
+            print(f"  [차트] {mk} {min(len(seenc), 40)}종목 기간차트 첨부")
+        except Exception as e:
+            print(f"  [차트] {mk} 오류: {repr(e)[:70]}")
 
     # 뉴스 수집 (한국 RSS + 미국 Finnhub 번역 + 종목별)
     news_data = {"kr": [], "us": []}

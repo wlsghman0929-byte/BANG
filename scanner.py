@@ -123,6 +123,50 @@ def fetch_kr_investors(code: str, days: int = 12) -> dict | None:
         return None
 
 
+# ---------------------------------------------------------------- 기간별 차트(일/주/월/년)
+def _ser(d: pd.DataFrame) -> dict:
+    return {"dates": [t.strftime("%y-%m-%d") for t in d.index],
+            "close": [round(float(x), 2) for x in d["Close"].tolist()]}
+
+
+def fetch_chart_series(market: str, code: str) -> dict | None:
+    """긴 일봉을 받아 일/주/월/년 종가 시리즈 생성 (모달 기간 전환용)."""
+    try:
+        if market.upper() == "KR":
+            from pykrx import stock
+            end = dt.date.today()
+            start = end - dt.timedelta(days=365 * 5 + 30)
+            df = stock.get_market_ohlcv(start.strftime("%Y%m%d"),
+                                        end.strftime("%Y%m%d"), code)
+            if df is None or len(df) == 0:
+                return None
+            df = df.rename(columns={"종가": "Close"})[["Close"]].dropna()
+        else:
+            import yfinance as yf
+            df = yf.download(code, period="5y", interval="1d",
+                             progress=False, auto_adjust=True)
+            if df is None or len(df) == 0:
+                return None
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df = df[["Close"]].dropna()
+        df.index = pd.to_datetime(df.index)
+        df = df[df["Close"] > 0]
+        if len(df) < 20:
+            return None
+        out = {"일": _ser(df.tail(120))}
+        for key, rule, keep in [("주", "W", 130), ("월", "M", 120), ("년", "Y", 30)]:
+            try:
+                r = df.resample(rule).last().dropna()
+                out[key] = _ser(r.tail(keep))
+            except Exception:
+                pass
+        return out
+    except Exception as e:
+        print(f"  [차트/{code}] 실패: {repr(e)[:50]}")
+        return None
+
+
 # ---------------------------------------------------------------- 지표 계산
 def _atr(df: pd.DataFrame, n: int = 14) -> float:
     h, l, c = df["High"], df["Low"], df["Close"]
@@ -239,6 +283,45 @@ def compute_metrics(ticker: str, df: pd.DataFrame, name: str = "",
     else:
         signal = "HOLD"
 
+    # ---- 종합 매수점수(0~100) + MFI + 급등임박 ----
+    mfi_v = float(last["MFI"]) if "MFI" in df.columns and not pd.isna(last["MFI"]) else 50.0
+    if mfi_v >= 55:
+        reasons.append("자금유입(MFI)")
+    elif mfi_v <= 20:
+        reasons.append("자금이탈(MFI)")
+    if vol_ratio >= 2:
+        reasons.append("거래량 급증")
+    sc = 50
+    sc += 12 if trend_up else -12
+    sc += 6 if above_fast else -4
+    if macd_up:
+        sc += 8
+    if cross_up or macd_turn_up:
+        sc += 6
+    if 45 <= rsi <= 65:
+        sc += 8
+    elif rsi > 72:
+        sc -= 8
+    elif rsi < 30:
+        sc += 4
+    if mfi_v >= 80:
+        sc -= 4
+    elif mfi_v >= 55:
+        sc += 8
+    elif mfi_v <= 20:
+        sc += 3
+    if vol_ratio >= 2:
+        sc += 8
+    elif vol_ratio >= 1.3:
+        sc += 4
+    score100 = max(0, min(100, int(round(sc))))
+    grade = ("강한 매수" if score100 >= 75 else "매수 우위" if score100 >= 60
+             else "중립" if score100 >= 45 else "매도 우위" if score100 >= 30 else "약세")
+    headline = " · ".join(reasons[:3]) if reasons else "특이 신호 없음"
+    hi20 = float(df["Close"].tail(20).max())
+    imminent = bool(vol_ratio >= 2.0 and abs(day_change) <= 2.5
+                    and close >= 0.96 * hi20 and trend_up)
+
     # ---- 다음 마감가 예측 + 과거 적중률 백테스트 ----
     closes_list = df["Close"].tolist()
     r_hat, sigma = predict_r(closes_list)
@@ -275,6 +358,11 @@ def compute_metrics(ticker: str, df: pd.DataFrame, name: str = "",
         "ret_vol": round(ret_std, 1),
         "rsi": round(rsi, 1),
         "score": score,
+        "score100": score100,
+        "grade": grade,
+        "headline": headline,
+        "mfi": round(mfi_v, 0),
+        "imminent": imminent,
         "signal": signal,
         "reasons": reasons,
         "buy_ratio": buy_ratio,
@@ -359,9 +447,12 @@ def rank(rows: list[dict]) -> dict:
     volatile = sorted(rows, key=lambda r: r["atr_pct"], reverse=True)[:n]
     recommend = sorted(
         [r for r in rows if r["signal"] == "BUY"],
-        key=lambda r: (r["score"], r["day_change"]), reverse=True)[:n]
+        key=lambda r: (r.get("score100", 0), r["day_change"]), reverse=True)[:n]
+    imminent = sorted(
+        [r for r in rows if r.get("imminent")],
+        key=lambda r: r["vol_ratio"], reverse=True)[:n]
     return {"gainers": gainers, "losers": losers, "vol_surge": vol_surge,
-            "volatile": volatile, "recommend": recommend}
+            "volatile": volatile, "recommend": recommend, "imminent": imminent}
 
 
 def finnhub_overlay(ranked: dict) -> int:

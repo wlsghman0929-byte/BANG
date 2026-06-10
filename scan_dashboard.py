@@ -82,6 +82,9 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .stat .b{background:var(--soft);border-radius:11px;padding:11px}
   .stat .k{font-size:11.5px;color:var(--mut)} .stat .v{font-size:15px;font-weight:700;margin-top:3px}
   .box{background:var(--soft);border-radius:12px;padding:12px;margin-top:12px}
+  #tfbtns{display:flex;gap:6px;margin:12px 0 0}
+  .tf{background:var(--soft);color:var(--mut);border:1px solid var(--bd);border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer}
+  .tf.on{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700}
   table{width:100%;border-collapse:collapse;font-size:13px}
   .it td,.it th{padding:8px 6px;border-bottom:1px solid var(--bd);text-align:right}
   .it th:first-child,.it td:first-child{text-align:left;color:var(--mut)}
@@ -113,6 +116,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   <div class="modal">
     <div class="mh"><div><h2 id="mt"></h2><div class="msub" id="ms"></div></div><button class="x" id="mx">×</button></div>
     <div class="stat" id="mstat"></div>
+    <div id="tfbtns"></div>
     <div class="box"><canvas id="mc" height="150"></canvas></div>
     <div class="box"><canvas id="mflow" height="150"></canvas></div>
     <div id="mnews"></div>
@@ -126,8 +130,8 @@ const RELOAD = __RELOAD__;
 const M = DATA.meta, MK = DATA.markets;
 const MK_LABEL = {US:'🇺🇸 미국', KR:'🇰🇷 한국'};
 const CUR = {US:'$', KR:'₩'};
-const TAB_KEYS = ['recommend','gainers','losers','vol_surge','volatile'];
-const TABS = [['recommend','⭐ 추천'],['gainers','📈 급등'],['losers','📉 급락'],
+const TAB_KEYS = ['recommend','imminent','gainers','losers','vol_surge','volatile'];
+const TABS = [['recommend','⭐ 추천'],['imminent','🚀 급등임박'],['gainers','📈 급등'],['losers','📉 급락'],
               ['vol_surge','🔊 거래량'],['volatile','⚡ 변동성'],['news','📰 뉴스']];
 let curMarket = M.market_order[0], curTab = 'recommend', curRows = [];
 
@@ -162,7 +166,8 @@ document.getElementById('tabs').onclick=e=>{const t=e.target.closest('.tab');if(
 document.getElementById('q').oninput=render;
 
 function whyText(d){
-  if(curTab==='recommend') return (d.reasons||[]).join(' · ');
+  if(curTab==='recommend') return (d.headline||(d.reasons||[]).join(' · '))+(d.score100!=null?` · 점수 ${d.score100}`:'');
+  if(curTab==='imminent') return `거래량 평소의 ${d.vol_ratio}배 · 가격은 아직 (점수 ${d.score100!=null?d.score100:'-'})`;
   if(curTab==='vol_surge') return `거래량 평소의 ${d.vol_ratio}배`;
   if(curTab==='volatile') return `변동성(ATR) ${d.atr_pct}%`;
   return `예상 ${cur()}${fmt(d.pred_close)} (${d.pred_chg>0?'+':''}${d.pred_chg}%)`;
@@ -236,12 +241,12 @@ function openModalRow(r){
   const cy=cur(); modalOpen=true;
   document.getElementById('mt').textContent=`${r.ticker} ${r.name||''}`;
   document.getElementById('ms').textContent=`현재가 ${cy}${fmt(r.close)} · 등락 ${r.day_change>0?'+':''}${r.day_change}% · RSI ${r.rsi!=null?r.rsi:'-'} · 신호 ${sigT(r.signal)}`;
-  const st=[['내일 예측 마감',`${cy}${fmt(r.pred_close)} (${r.pred_chg>0?'+':''}${r.pred_chg}%)`],
+  const st=[['종합 매수점수', (full.score100!=null?full.score100:'-')+' / 100 ('+(full.grade||'-')+')'],
+    ['자금흐름 MFI', full.mfi!=null?full.mfi:'-'],
+    ['내일 예측 마감',`${cy}${fmt(r.pred_close)} (${r.pred_chg>0?'+':''}${r.pred_chg}%)`],
     ['예측 적중률',(r.pred_hit!=null?r.pred_hit:(full.pred_hit!=null?full.pred_hit:'-'))+'%'],
     ['예측 범위', full.pred_low!=null?`${cy}${fmt(full.pred_low)}~${fmt(full.pred_high)}`:'-'],
-    ['RSI', r.rsi!=null?r.rsi:'-'],
-    ['거래량배수', full.vol_ratio!=null?full.vol_ratio+'x':'-'],
-    ['변동성(ATR)', full.atr_pct!=null?full.atr_pct+'%':'-']];
+    ['거래량배수', full.vol_ratio!=null?full.vol_ratio+'x':'-']];
   document.getElementById('mstat').innerHTML=st.map(s=>`<div class="b"><div class="k">${s[0]}</div><div class="v">${s[1]}</div></div>`).join('');
 
   const cs=getComputedStyle(document.body);
@@ -250,12 +255,25 @@ function openModalRow(r){
   const grid={color:gcol}, tick={color:tcol,maxTicksLimit:8};
   const d=full.detail;
   if(chart)chart.destroy(); if(flowChart)flowChart.destroy(); if(invChart)invChart.destroy();
-  document.getElementById('mc').style.display = d?'':'none';
+  const tfWrap=document.getElementById('tfbtns');
+  function drawPrice(s,label){ if(chart)chart.destroy();
+    chart=new Chart(document.getElementById('mc'),{type:'line',data:{labels:s.dates,
+      datasets:[{label:'가격 ('+label+')',data:s.close,borderColor:lcol,borderWidth:1.8,pointRadius:0,tension:.15}]},
+      options:{plugins:{legend:{labels:{color:tcol}}},scales:{x:{ticks:tick,grid:grid},y:{ticks:tick,grid:grid}}}}); }
+  if(full.chart){
+    const lab={"일":"일봉","주":"주봉","월":"월봉","년":"연봉"};
+    const tfs=['일','주','월','년'].filter(k=>full.chart[k]&&full.chart[k].dates.length);
+    tfWrap.innerHTML=tfs.map((k,i)=>`<button class="tf${i===0?' on':''}" data-k="${k}">${k}</button>`).join('');
+    document.getElementById('mc').style.display='';
+    drawPrice(full.chart[tfs[0]],lab[tfs[0]]);
+    tfWrap.querySelectorAll('.tf').forEach(b=>b.onclick=()=>{
+      tfWrap.querySelectorAll('.tf').forEach(x=>x.classList.toggle('on',x===b));
+      drawPrice(full.chart[b.dataset.k],lab[b.dataset.k]);});
+  } else if(d){ tfWrap.innerHTML=''; document.getElementById('mc').style.display='';
+    drawPrice({dates:d.dates,close:d.close},'최근 60일');
+  } else { tfWrap.innerHTML=''; document.getElementById('mc').style.display='none'; }
   document.getElementById('mflow').style.display = d?'':'none';
   if(d){
-    chart=new Chart(document.getElementById('mc'),{type:'line',data:{labels:d.dates,
-      datasets:[{label:'가격(최근 60일)',data:d.close,borderColor:lcol,borderWidth:1.8,pointRadius:0,tension:.15}]},
-      options:{plugins:{legend:{labels:{color:tcol}}},scales:{x:{ticks:tick,grid:grid},y:{ticks:tick,grid:grid}}}});
     const obv=[];let acc=0;for(let k=0;k<d.vol.length;k++){acc+=(d.updown[k]>0?1:-1)*d.vol[k];obv.push(Math.round(acc));}
     const vc=d.updown.map(u=>u>0?'rgba(224,45,60,.7)':'rgba(37,99,235,.7)');
     flowChart=new Chart(document.getElementById('mflow'),{data:{labels:d.dates,datasets:[
